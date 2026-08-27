@@ -29,6 +29,7 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Run Playwright tests
+        id: run-tests
         run: npx playwright test
 
       - name: Upload Playwright report
@@ -38,3 +39,13 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 30
+
+      - name: Notify Microsoft Teams
+        if: always()
+        env:
+          TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK }}
+        run: |
+          STATUS=${{ steps.run-tests.outcome }}
+          curl -H "Content-Type: application/json" \
+            -d "{\"text\":\"Playwright tests: $STATUS\\nRepository: $GITHUB_REPOSITORY\\nRun: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" \
+            "$TEAMS_WEBHOOK"
