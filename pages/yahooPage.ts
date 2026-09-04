@@ -8,7 +8,7 @@ export class YahooPage {
   }
 
   async navigateToYahoo() {
-    await this.page.goto('https://www.yahoo.com');
+    await this.page.goto('https://in.search.yahoo.com/');
   }
 
   async getPageTitle() {

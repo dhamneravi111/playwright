@@ -26,11 +26,48 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
 
       - name: Run Playwright tests
         id: run-tests
-        run: npx playwright test
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results.json
+        run: npx playwright test --reporter=list,json
+
+      - name: Create test summary
+        id: test-summary
+        if: always()
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const report = JSON.parse(fs.readFileSync('test-results.json', 'utf8'));
+          const counts = { total: 0, passed: 0, failed: 0, skipped: 0 };
+
+          function visitSuite(suite) {
+            for (const spec of suite.specs || []) {
+              for (const test of spec.tests || []) {
+                counts.total += 1;
+                const result = test.results?.[test.results.length - 1];
+                const status = result?.status || test.status;
+                if (status === 'passed') counts.passed += 1;
+                else if (status === 'skipped' || status === 'pending') counts.skipped += 1;
+                else counts.failed += 1;
+              }
+            }
+            for (const childSuite of suite.suites || []) visitSuite(childSuite);
+          }
+
+          for (const suite of report.suites || []) visitSuite(suite);
+          const passPercentage = counts.total
+            ? ((counts.passed / counts.total) * 100).toFixed(2)
+            : '0.00';
+          const output = process.env.GITHUB_OUTPUT;
+          fs.appendFileSync(output, `total=${counts.total}\n`);
+          fs.appendFileSync(output, `passed=${counts.passed}\n`);
+          fs.appendFileSync(output, `failed=${counts.failed}\n`);
+          fs.appendFileSync(output, `skipped=${counts.skipped}\n`);
+          fs.appendFileSync(output, `pass_percentage=${passPercentage}%\n`);
+          NODE
 
       - name: Upload Playwright report
         if: always()
@@ -49,3 +86,28 @@ jobs:
           curl -H "Content-Type: application/json" \
             -d "{\"text\":\"Playwright tests: $STATUS\\nRepository: $GITHUB_REPOSITORY\\nRun: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID\"}" \
             "$TEAMS_WEBHOOK"
+
+      - name: Email test result
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: qa1shopkirana@gmail.com
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: Playwright tests ${{ steps.run-tests.outcome }}
+          to: dhamneravi111@gmail.com
+          from: qa1shopkirana@gmail.com
+          body: |
+            Playwright tests: ${{ steps.run-tests.outcome }}
+            Repository: ${{ github.repository }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Test summary:
+            Total: ${{ steps.test-summary.outputs.total }}
+            Passed: ${{ steps.test-summary.outputs.passed }}
+            Failed: ${{ steps.test-summary.outputs.failed }}
+            Skipped: ${{ steps.test-summary.outputs.skipped }}
+            Pass percentage: ${{ steps.test-summary.outputs.pass_percentage }}
+          attachments: playwright-report/index.html
